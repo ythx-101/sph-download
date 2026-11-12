@@ -4,6 +4,10 @@
 
 > **English summary.** `sph-download` is a small command-line tool and agent skill that saves a WeChat Channels (视频号) share link as a local MP4, together with its caption, author, engagement counts and cover image. It works by asking the Yuanbao web app — using your own logged-in session — to resolve the share link into a playable video address, then downloading and verifying the file with ffmpeg. It is an independent Python implementation of an idea from [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download); use that project if you need a desktop client, MCP server or multi-platform support. For study and personal archiving of content you have the right to keep.
 
+![sph-download 工作流程动图](assets/sph-demo.gif)
+
+<sub>动图用 [live-panel-skill](https://github.com/ythx-101/live-panel-skill) 制作，高清版见 [assets/sph-demo.mp4](assets/sph-demo.mp4)。节奏为示意，「约 9 秒」为单条实测。</sub>
+
 ## 它做什么
 
 给它一条视频号分享链接，它在本地存下：
