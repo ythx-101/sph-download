@@ -1,6 +1,6 @@
 ---
 name: sph-download
-description: 把微信视频号的分享链接保存成本地 mp4（附文案、作者、互动数、封面）。用户发来 weixin.qq.com/sph/… 或 channels.weixin.qq.com/finder-preview… 链接，或者说「下这个视频号」「保存这条视频号」时使用。
+description: 把微信视频号的分享链接保存成本地 mp4（附文案、作者、互动数、封面）。用户发来 weixin.qq.com/sph/… 或 channels.weixin.qq.com/finder-preview… 链接，或者说「下这个视频号」「保存这条视频号」时使用；也适用于用户说「下载视频号」「视频号视频保存到本地」「WeChat Channels」时。
 ---
 
 # 视频号下载

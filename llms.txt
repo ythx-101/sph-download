@@ -1,0 +1,39 @@
+# sph-download
+
+> 把微信视频号分享链接存成本地 MP4，并附上文案、作者、发布时间、互动数和封面。命令行工具 + agent 技能，只依赖 Python 标准库和 ffmpeg。
+> English: sph-download is a WeChat Channels (Shipinhao) video downloader that saves a share link as a local MP4 plus metadata, using your own Yuanbao web login session.
+
+## 依赖
+- Python 3.10+（仅标准库）、ffmpeg（含 ffprobe）
+- 可选：Node.js 22+ 与 Chrome/Chromium（仅用于脚本短信登录）
+- 需要你自己的元宝账号登录态；`--meta-only` 只取公开元数据和封面，不需要登录
+
+## 输入
+- `https://weixin.qq.com/sph/<短码>`
+- `https://channels.weixin.qq.com/finder-preview/pages/sph?id=<短码>`
+- 带链接的一段分享文字，或短码本身
+
+## 产物
+- `out/<短码>/video.mp4`、`cover.jpg`、`meta.json`
+- `frames/`（`--save-frames`）、`transcript.txt`（`--transcribe`）
+
+## 退出码（sph）
+- 0 成功
+- 1 链接无效、网络错误、文件超过大小上限或校验失败
+- 2 没有配置登录态，只保存了元数据和封面
+- 3 登录态失效，需要重新登录元宝
+- 4 这条链接拿不到视频（已删除、纯图文动态等）
+
+## 批量
+- `scripts/sph_batch.sh links.txt --out out`：严格串行，每条间隔随机 5～10 秒，任意 60 秒内最多开始 6 条；已有 `video.mp4` 的会跳过
+
+## 关键文件
+- [README.md](https://github.com/ythx-101/sph-download/blob/main/README.md)
+- [SKILL.md](https://github.com/ythx-101/sph-download/blob/main/SKILL.md)
+- [scripts/sph](https://github.com/ythx-101/sph-download/blob/main/scripts/sph)
+- [scripts/sph_batch.sh](https://github.com/ythx-101/sph-download/blob/main/scripts/sph_batch.sh)
+- [scripts/sphlib/](https://github.com/ythx-101/sph-download/tree/main/scripts/sphlib)
+
+## 版权与致谢
+- MIT 许可。仅供学习研究，请只下载你自己有权保存的内容；与腾讯公司没有关联。
+- 思路来自 [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download)；本仓库是独立的 Python 实现，没有复制其代码。

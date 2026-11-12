@@ -1,12 +1,19 @@
-# sph-download
+# sph-download：视频号分享链接下载工具
+
+把微信视频号分享链接存成本地 MP4，并附上文案、作者、发布时间、互动数和封面。给想把自己有权保存的视频号内容归档到本地、或想让 Claude Code 等 agent 帮忙下载视频号的人用。命令行工具 + agent 技能，只依赖 Python 标准库和 ffmpeg。
+
+- 支持分享短链、预览页链接、带链接的分享文字或短码本身
+- 需要你自己的元宝账号登录态；只要文案和封面时用 `--meta-only`，不需要登录
+- 支持批量下载和断点续跑（`sph_batch.sh`）
+- 可选生成文字稿（`--transcribe`）
 
 受开源项目 [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download) 启发，借鉴了它「用元宝网页端解析视频号分享链接」的思路；本仓库是独立的 Python 实现，没有复制它的代码。
 
-> **English summary.** `sph-download` is a small command-line tool and agent skill that saves a WeChat Channels (视频号) share link as a local MP4, together with its caption, author, engagement counts and cover image. It works by asking the Yuanbao web app — using your own logged-in session — to resolve the share link into a playable video address, then downloading and verifying the file with ffmpeg. It is an independent Python implementation of an idea from [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download); use that project if you need a desktop client, MCP server or multi-platform support. For study and personal archiving of content you have the right to keep.
+> **English summary.** `sph-download` is a WeChat Channels (视频号 / Shipinhao) video downloader: a small command-line tool and agent skill that saves a WeChat Channels (视频号) share link as a local MP4, together with its caption, author, engagement counts and cover image. It works by asking the Yuanbao web app — using your own logged-in session — to resolve the share link into a playable video address, then downloading and verifying the file with ffmpeg. It is an independent Python implementation of an idea from [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download); use that project if you need a desktop client, MCP server or multi-platform support. For study and personal archiving of content you have the right to keep.
 
 ![sph-download 工作流程动图](assets/sph-demo.gif)
 
-<sub>动图用 [live-panel-skill](https://github.com/ythx-101/live-panel-skill) 制作，高清版见 [assets/sph-demo.mp4](assets/sph-demo.mp4)。节奏为示意，「约 9 秒」为单条实测。</sub>
+<sub>动图用 [live-panel-skill](https://github.com/ythx-101/live-panel-skill) 制作。节奏为示意，「约 9 秒」为单条实测。</sub>
 
 ## 它做什么
 
@@ -30,6 +37,15 @@ out/<短码>/
 
 所以你需要一个元宝账号，并且登录态只保存在你自己的机器上。
 
+## 适用场景与同类方案
+
+| 适合 | 不适合 |
+| --- | --- |
+| 命令行或服务器环境 | 需要图形界面、桌面客户端、MCP 服务或多平台支持：请用原项目 [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download) |
+| 想让 Claude Code 等 agent 调用 | 纯图文动态：拿不到视频，退出码 4 |
+| 只需要「链接 → mp4 + 元数据」 | 不想使用元宝账号：只能用 `--meta-only` 拿公开元数据 |
+| 批量归档，且接受串行限速 | |
+
 ## 安装
 
 需要：
@@ -46,6 +62,16 @@ scripts/sph --help
 ```
 
 作为 Claude Code 技能使用：把整个目录放到 `~/.claude/skills/sph-download/`（或项目里的 `.claude/skills/sph-download/`）。其他 agent 让它读 `SKILL.md` 即可。
+
+### 一分钟上手
+
+```bash
+git clone https://github.com/ythx-101/sph-download.git && cd sph-download
+scripts/sph "<链接>" --meta-only                  # 不需要登录，先确认能连通
+scripts/sph "<链接>" --out out --save-frames      # 配好登录态后下载视频
+```
+
+产物在 `out/<短码>/`。登录态怎么配见下一节「登录元宝」。
 
 ## 登录元宝
 
@@ -153,6 +179,50 @@ print(result.video_url)   # 有时效，拿到后尽快下载
 | `sphlib/resolve.py` | 链接 → 元数据 + 视频地址。纯网络请求，不读写磁盘 |
 | `sphlib/auth.py` | 登录态文件的位置约定与读取 |
 | `sphlib/media.py` | 限大小下载、ffprobe 校验、抽帧、提取音频 |
+
+离线单元测试（不联网、不需要 ffmpeg）：`python3 -m unittest discover -s tests`
+
+## 常见问题（FAQ）
+
+### 怎么把视频号视频下载到电脑本地？（How to download WeChat Channels videos?）
+
+按「安装」装好后运行 `scripts/sph "<链接>" --out out`，视频、封面和元数据会存到 `out/<短码>/`。详见「一分钟上手」。
+
+### 一定要登录吗？需要什么账号？
+
+下载视频需要你自己的元宝账号登录态，见「登录元宝」。只要文案和封面时用 `--meta-only`，不需要登录。
+
+### 登录态安全吗？存在哪里？
+
+只存在本机 `~/.config/sph-download/yuanbao.cookie`，权限应为 600，工具不会打印它。见「安全提示」。
+
+### 能批量下载吗？会不会太快？
+
+可以，用 `scripts/sph_batch.sh`。严格串行，每条之间随机等 5～10 秒，任意 60 秒内最多开始 6 条。
+
+### 图文动态、已删除的视频能下吗？
+
+不能。这类链接拿不到视频，`sph` 返回退出码 4，但会保存公开元数据和封面。
+
+### 昨天还能用，今天失效了怎么办？
+
+本工具依赖元宝网页端和视频号预览页的现有行为。先确认登录态是否失效（退出码 3，重新登录即可），仍不行再看原项目的最新进展。
+
+### 支持 Windows 吗？
+
+需要 Python 3.10+ 和 ffmpeg；批量脚本是 bash，登录脚本需要 Node.js 22+。未在原生 Windows 上验证，可以尝试 WSL。
+
+### 和 wx_channels_download 有什么区别？
+
+本项目是独立的 Python 命令行实现，只做「链接 → 本地文件」。原项目功能更全（本地客户端、MCP、多平台），需要这些请直接用原项目。
+
+### 能用来搬运、转载别人的视频吗？
+
+不能。请只下载你自己有权保存的内容，见「免责声明」。
+
+### 怎么让 Claude Code 使用它？
+
+把整个目录放到 `~/.claude/skills/sph-download/`，见「安装」。其他 agent 让它读 `SKILL.md` 即可。
 
 ## 常见报错
 

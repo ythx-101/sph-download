@@ -83,6 +83,13 @@ def write_meta(out_dir: str, meta: dict) -> str:
 
 
 def main() -> int:
+    raw_max_mb = os.environ.get("SPH_MAX_MB", str(media.DEFAULT_MAX_MB))
+    try:
+        env_max_mb = int(raw_max_mb)
+    except ValueError:
+        err("环境变量 SPH_MAX_MB 必须是整数（MiB），当前值无效")
+        return EXIT_ERROR
+
     ap = argparse.ArgumentParser(prog="sph", description="把一条视频号分享链接保存到本地")
     ap.add_argument("link", help="分享短链、预览页链接或短码")
     ap.add_argument("--out", default="out", help="输出根目录（默认 ./out）")
@@ -92,10 +99,14 @@ def main() -> int:
     ap.add_argument("--transcribe", action="store_true", help="生成文字稿 transcript.txt")
     ap.add_argument(
         "--max-mb", type=int,
-        default=int(os.environ.get("SPH_MAX_MB", media.DEFAULT_MAX_MB)),
+        default=env_max_mb,
         help=f"单个视频大小上限，MiB（默认 {media.DEFAULT_MAX_MB}）",
     )
     args = ap.parse_args()
+
+    if args.max_mb <= 0:
+        err("--max-mb（或环境变量 SPH_MAX_MB）必须是大于 0 的整数（MiB）")
+        return EXIT_ERROR
 
     lacking_tools = media.require_tools()
     if lacking_tools:
