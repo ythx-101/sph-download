@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""sph：把一条视频号分享链接保存到本地。
+
+    sph <链接或短码> [--out 目录] [--save-frames] [--transcribe]
+
+产物在 <输出目录>/<短码>/ 下：
+    meta.json       文案、作者、发布时间、互动数、时长、分辨率
+    cover.jpg       封面
+    video.mp4       视频（已用 ffprobe 校验并抽帧验证）
+    frames/         加 --save-frames 时保留 3 张抽帧
+    transcript.txt  加 --transcribe 时生成的文字稿
+
+退出码：0 成功；1 输入、网络或文件错误；2 没有配置登录态（只存了 meta.json 和 cover.jpg）；
+        3 登录态失效，需要重新登录元宝；4 这条链接拿不到视频。
+
+解析逻辑在 sphlib/ 里，这个文件只管参数、落盘和提示。
+"""
+
+import argparse
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from sphlib import auth, media, resolve  # noqa: E402
+
+EXIT_OK, EXIT_ERROR, EXIT_NO_LOGIN, EXIT_LOGIN_EXPIRED, EXIT_NO_VIDEO = 0, 1, 2, 3, 4
+ENV_TRANSCRIBE_CMD = "SPH_TRANSCRIBE_CMD"
+
+
+def log(msg: str) -> None:
+    print(f"[sph] {msg}", flush=True)
+
+
+def err(msg: str) -> None:
+    print(f"[sph] 错误: {msg}", file=sys.stderr, flush=True)
+
+
+def transcribe(video_path: str, out_txt: str, tmp_dir: str) -> dict:
+    """文字稿：优先用 SPH_TRANSCRIBE_CMD 指定的命令，其次本机的 whisper 命令。"""
+    audio = os.path.join(tmp_dir, "speech_16k.flac")
+    audio_bytes = media.extract_speech_audio(video_path, audio)
+
+    template = os.environ.get(ENV_TRANSCRIBE_CMD, "").strip()
+    if template:
+        cmd = template.format(audio=shlex.quote(audio), out=shlex.quote(out_txt))
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if proc.returncode != 0 or not os.path.isfile(out_txt) or os.path.getsize(out_txt) == 0:
+            tail = (proc.stderr or proc.stdout or "").strip()[-200:]
+            return {"status": "error", "backend": "custom", "error": f"转写命令失败或没有产出文字: {tail}"}
+        return {"status": "ok", "backend": "custom", "audio_bytes": audio_bytes}
+
+    whisper_bin = shutil.which("whisper")
+    if whisper_bin:
+        proc = subprocess.run(
+            [whisper_bin, audio, "--language", "Chinese", "--output_format", "txt", "--output_dir", tmp_dir],
+            capture_output=True,
+            text=True,
+        )
+        gen = os.path.join(tmp_dir, "speech_16k.txt")
+        if proc.returncode != 0 or not os.path.isfile(gen):
+            return {"status": "error", "backend": "whisper", "error": (proc.stderr or "").strip()[-200:]}
+        shutil.move(gen, out_txt)
+        return {"status": "ok", "backend": "whisper", "audio_bytes": audio_bytes}
+
+    return {
+        "status": "no_backend",
+        "backend": None,
+        "error": f"没有可用的转写工具：请安装 whisper 命令，或设置环境变量 {ENV_TRANSCRIBE_CMD}",
+    }
+
+
+def write_meta(out_dir: str, meta: dict) -> str:
+    path = os.path.join(out_dir, "meta.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    return path
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="sph", description="把一条视频号分享链接保存到本地")
+    ap.add_argument("link", help="分享短链、预览页链接或短码")
+    ap.add_argument("--out", default="out", help="输出根目录（默认 ./out）")
+    ap.add_argument("--cookie-file", help=f"登录态文件（默认 {auth.cookie_file()}，也可用环境变量 {auth.ENV_COOKIE_FILE}）")
+    ap.add_argument("--meta-only", action="store_true", help="只取公开元数据和封面，不需要登录态")
+    ap.add_argument("--save-frames", action="store_true", help="把 3 张抽帧保留在 frames/ 里")
+    ap.add_argument("--transcribe", action="store_true", help="生成文字稿 transcript.txt")
+    ap.add_argument(
+        "--max-mb", type=int,
+        default=int(os.environ.get("SPH_MAX_MB", media.DEFAULT_MAX_MB)),
+        help=f"单个视频大小上限，MiB（默认 {media.DEFAULT_MAX_MB}）",
+    )
+    args = ap.parse_args()
+
+    lacking_tools = media.require_tools()
+    if lacking_tools:
+        err(f"缺少命令: {'、'.join(lacking_tools)}，请先安装 ffmpeg")
+        return EXIT_ERROR
+
+    cookie, cookie_source = (None, "") if args.meta_only else auth.load_cookie(args.cookie_file)
+
+    # 第一步：解析（纯网络）
+    login_problem = None
+    video_problem = None
+    try:
+        short_id = resolve.parse_share_id(args.link)
+        log(f"正在解析 {resolve.share_url_of(short_id)}")
+        try:
+            result = resolve.resolve(short_id, cookie)
+        except (resolve.LoginExpiredError, resolve.VideoUnavailableError) as e:
+            # 登录态或视频有问题时，公开元数据照样保存
+            if isinstance(e, resolve.LoginExpiredError):
+                login_problem = f"{e}（登录态来源: {cookie_source}）"
+            else:
+                video_problem = str(e)
+            result = resolve.resolve(short_id, None)
+    except resolve.InvalidLinkError as e:
+        err(str(e))
+        return EXIT_ERROR
+    except (resolve.SphError, OSError) as e:
+        err(f"解析失败: {e}")
+        return EXIT_ERROR
+
+    meta = result.meta
+    out_dir = os.path.join(args.out, result.short_id)
+    os.makedirs(out_dir, exist_ok=True)
+
+    # 第二步：下载、校验、落盘（临时文件放系统临时目录，结束自动清理）
+    with tempfile.TemporaryDirectory(prefix=f"sph_{result.short_id}_") as tmp_dir:
+        max_bytes = args.max_mb * 1024 * 1024
+        try:
+            if result.cover_url:
+                tmp_cover = os.path.join(tmp_dir, "cover.jpg")
+                media.download(result.cover_url, tmp_cover, max_bytes)
+                media.probe(tmp_cover)
+                shutil.move(tmp_cover, os.path.join(out_dir, "cover.jpg"))
+                meta["cover_file"] = "cover.jpg"
+
+            if result.video_url:
+                tmp_video = os.path.join(tmp_dir, "video.mp4")
+                size = media.download(result.video_url, tmp_video, max_bytes)
+                info = media.summarize_video(media.probe(tmp_video))
+                frames_dir = os.path.join(out_dir, "frames") if args.save_frames else os.path.join(tmp_dir, "frames")
+                frames = media.extract_frames(tmp_video, info["duration"] or 0.0, frames_dir)
+                dst_video = os.path.join(out_dir, "video.mp4")
+                shutil.move(tmp_video, dst_video)
+                meta["duration"] = info["duration"]
+                meta["video_file"] = "video.mp4"
+                meta["video"] = dict(info, size_bytes=size, verified_frames=len(frames))
+                log(
+                    f"视频已保存 -> {dst_video}（{info['duration']}s，{info['width']}x{info['height']}，"
+                    f"{size / 1048576:.1f} MiB，抽帧验证 {len(frames)} 帧）"
+                )
+
+                if args.transcribe:
+                    if not info["audio_codec"]:
+                        meta["transcript"] = {"status": "no_audio"}
+                    else:
+                        dst_txt = os.path.join(out_dir, "transcript.txt")
+                        meta["transcript"] = transcribe(dst_video, dst_txt, tmp_dir)
+                        if meta["transcript"]["status"] == "ok":
+                            meta["transcript_file"] = "transcript.txt"
+                            log(f"文字稿已保存 -> {dst_txt}")
+                        else:
+                            print(f"[sph] 警告: 文字稿没有生成: {meta['transcript'].get('error')}", file=sys.stderr)
+        except (media.SizeLimitExceededError, media.MediaError, OSError, subprocess.CalledProcessError) as e:
+            write_meta(out_dir, meta)
+            err(f"下载或校验失败: {e}")
+            return EXIT_ERROR
+
+    log(f"元数据已保存 -> {write_meta(out_dir, meta)}")
+
+    if meta["video_file"] or args.meta_only:
+        return EXIT_OK
+    if login_problem:
+        err(f"{login_problem}。已保存公开元数据和封面。（退出码 {EXIT_LOGIN_EXPIRED}）")
+        return EXIT_LOGIN_EXPIRED
+    if video_problem:
+        err(f"{video_problem}。已保存公开元数据和封面。（退出码 {EXIT_NO_VIDEO}）")
+        return EXIT_NO_VIDEO
+    err(
+        f"没有找到登录态（{cookie_source}），只保存了公开元数据和封面。"
+        f"请先登录元宝网页端，见 README 的「登录元宝」一节。（退出码 {EXIT_NO_LOGIN}）"
+    )
+    return EXIT_NO_LOGIN
+
+
+if __name__ == "__main__":
+    sys.exit(main())

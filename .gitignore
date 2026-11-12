@@ -1,0 +1,28 @@
+# 登录态与登录握手文件：绝不能进仓库
+*.cookie
+*cookie*.txt
+cookies.json
+sms.code
+NEED_CODE
+.env
+.env.*
+
+# 下载产物
+*.mp4
+*.m4a
+*.flac
+out/
+out*/
+output/
+downloads/
+batch.tsv
+transcript*.txt
+
+# 链接清单（可能含私人收藏）
+links*.txt
+
+# 运行时杂项
+__pycache__/
+*.pyc
+*.log
+.DS_Store
